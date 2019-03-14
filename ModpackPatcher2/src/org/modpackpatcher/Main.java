@@ -9,7 +9,11 @@ import java.io.Reader;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -24,7 +28,7 @@ public class Main
 	{
 		try
 		{
-			new Main();
+			new Main(args);
 		}
 		catch (Exception e)
 		{
@@ -35,8 +39,10 @@ public class Main
 	private String zipFileName = "packet.zip";
 	private String scriptFileName = "script.json";
 	
-	public Main() throws Exception
+	public Main(String[] args) throws Exception
 	{
+		Map<String,List<String>> arguments = parseArguments(args);
+		
 		File f = new File(getCurrentLocation(), this.zipFileName);
 		ZipFile zip = new ZipFile(f);
 		
@@ -54,6 +60,34 @@ public class Main
 		}
 	}
 	
+	public static Map<String,List<String>> parseArguments(String[] args)
+	{
+		Map<String,List<String>> out = new HashMap<>();
+		
+		String current = "";
+		
+		if(args.length > 0)
+		{
+			for(String s : args)
+			{
+				if(s.startsWith("-"))
+				{
+					current = s.replaceFirst("-", "");
+					out.put(current, new ArrayList<>());
+				}
+				else
+				{
+					if(out.containsKey(current))
+					{
+						out.get(current).add(s);
+					}
+				}
+			}
+		}
+		
+		return out;
+	}
+	
 	private void readScriptFile(Reader r, ZipFile zip) throws Exception
 	{
 		JSONTokener tokener = new JSONTokener(r);
@@ -61,30 +95,7 @@ public class Main
 		
 		File cache = new File(getCacheLocation());
 		
-		if(mainBlock.has("inserts"))
-		{
-			JSONArray inserts = mainBlock.getJSONArray("inserts");
-			
-			for(Iterator<Object> it = inserts.iterator(); it.hasNext();)
-			{
-				JSONObject insert = (JSONObject)it.next();
-				
-				processInsertDownload(insert);
-			}
-			
-			File mods = new File(getCurrentLocation(), "mods");
-			
-			for(Iterator<Object> it = inserts.iterator(); it.hasNext();)
-			{
-				JSONObject insert = (JSONObject)it.next();
-				String expectedFile = insert.getString("expected-file");
-				
-				File inF = new File(cache, expectedFile);
-				File outF = new File(mods, expectedFile);
-				
-				Files.copy(inF.toPath(), outF.toPath(), StandardCopyOption.REPLACE_EXISTING);
-			}
-		}
+		processDownloads(mainBlock);
 		
 		if(mainBlock.has("extracts"))
 		{
@@ -124,20 +135,84 @@ public class Main
 		}
 	}
 	
-	
-	
-	private void processInsertDownload(JSONObject obj) throws Exception
+	private void processDownloads(JSONObject obj) throws Exception
 	{
-		String link = obj.getString("link");
-		String expectedFile = obj.getString("expected-file");
+		if(obj.has("downloads"))
+		{
+			JSONArray inserts = obj.getJSONArray("downloads");
+			
+			List<DownloadEntry> downloads = new ArrayList<>();
+			
+			for(Iterator<Object> it = inserts.iterator(); it.hasNext();)
+			{
+				DownloadEntry e = processDownloadScript((JSONObject)it.next());
+				if(e != null) downloads.add(e);
+			}
+			
+			for(DownloadEntry e : downloads)
+				processDownload(e);
+				
+		}
+	}
+	
+	private DownloadEntry processDownloadScript(JSONObject obj) throws Exception
+	{
+		DownloadEntry out = new DownloadEntry();
+		out.link = obj.getString("link");
+		out.file = obj.getString("file");
+		return out;
+	}
+	
+	private void processDownload(DownloadEntry entry) throws Exception
+	{
+		openWebsite(entry.link);
 		
-		File expected = new File(getDownloadLocation(), expectedFile);
+		File file = new File(getDownloadLocation(), entry.file);
 		
-		openWebsite(link);
+		System.out.print("Waiting for Download of File \"" + entry.file + "\" from \"" + entry.link +"\" ...");
+		boolean success = testForFile(file, 60, 1000l);
+		if(success)
+		{
+			System.out.println("Success!");
+			System.out.print("Copying File \"" + entry.file + "\" from Downloads to Cache...");
+			Files.copy(file.toPath(), new File(getCacheLocation(), entry.file).toPath(), StandardCopyOption.REPLACE_EXISTING);
+			System.out.println("Finished!");
+		}
+		else
+		{
+			System.out.println("Failed!");
+			System.exit(-1);
+		}
+	}
+	
+	private boolean testForFile(File file, int maxRetries, long wait) throws Exception
+	{
+		int retry = 0;
+		
+		while(!file.exists())
+		{
+			if(retry <= maxRetries)
+			{
+				retry++;
+				Thread.sleep(wait);
+			}
+			else
+			{
+				return false;
+			}
+		}
+		
+		return true;
+	}
+	
+	private void test()
+	{
+		
+		
 
 		File result = new File(getCacheLocation(), expectedFile); 
 		
-		while(!expected.exists()) { Thread.sleep(1000l); }
+		
 		
 		Files.copy(expected.toPath(), result.toPath(), StandardCopyOption.REPLACE_EXISTING);
 	}
@@ -163,14 +238,7 @@ public class Main
 		}
 	}
 	
-	private void openWebsite(String url) throws Exception
-	{
-		URL website = new URL(url);
-		
-		Desktop desktop = Desktop.getDesktop();
-		
-		desktop.browse(website.toURI());
-	}
+	private void openWebsite(String url) throws Exception { Desktop.getDesktop().browse(new URL(url).toURI()); }
 	
 	private String getDownloadLocation()
 	{
