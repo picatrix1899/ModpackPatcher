@@ -43,7 +43,12 @@ public class Main
 	{
 		Map<String,List<String>> arguments = parseArguments(args);
 		
+		if(arguments.containsKey("packet"))
+			this.zipFileName = arguments.get("packet").get(0);
+		
+		
 		File f = new File(getCurrentLocation(), this.zipFileName);
+		
 		ZipFile zip = new ZipFile(f);
 		
 		File cache = new File(getCacheLocation());
